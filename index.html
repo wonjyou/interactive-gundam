@@ -1,0 +1,293 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#060a18">
+<title>Interactive Gundam</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Oxanium:wght@700&family=Saira+Semi+Condensed:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --space: #060a18;
+    --light: #e9eef7;
+    --light-soft: rgba(233, 238, 247, 0.62);
+    --yellow: #f2b90f;
+    --edge: clamp(14px, 2.6vw, 36px);
+    --cut: 8px;
+    --cut-shape: polygon(0 0, calc(100% - var(--cut)) 0, 100% var(--cut), 100% 100%, var(--cut) 100%, 0 calc(100% - var(--cut)));
+    --cut-inner: polygon(0 0, calc(100% - var(--cut) + 0.6px) 0, 100% calc(var(--cut) - 0.6px), 100% 100%, calc(var(--cut) - 0.6px) 100%, 0 calc(100% - var(--cut) + 0.6px));
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; overflow: hidden; overscroll-behavior: none; background: var(--space); }
+  html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; -webkit-tap-highlight-color: transparent; }
+  body {
+    color: var(--light);
+    font: 500 15px/1.4 "Saira Semi Condensed", "Arial Narrow", "Helvetica Neue", sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -webkit-touch-callout: none;
+  }
+  canvas { position: fixed; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; cursor: grab; }
+  canvas.dragging { cursor: grabbing; }
+  button { touch-action: manipulation; user-select: none; -webkit-user-select: none; }
+  .sr-only { position: absolute; width: 1px; height: 1px; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+
+  /* ---- top: title ---- */
+  .top {
+    position: fixed;
+    top: calc(var(--edge) + env(safe-area-inset-top));
+    left: calc(var(--edge) + env(safe-area-inset-left));
+    right: calc(var(--edge) + env(safe-area-inset-right));
+    display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 14px 24px;
+    pointer-events: none;
+  }
+  .plate h1 {
+    margin: 0;
+    font: 700 clamp(26px, 4.6vw, 60px)/1 "Oxanium", "Saira Semi Condensed", "Arial Narrow", sans-serif;
+    letter-spacing: 0.02em; text-transform: uppercase;
+  }
+  .plate p { margin: 10px 0 0; max-width: 34ch; color: var(--light-soft); }
+
+  /* Segmented switch: a light shape with dark cells inset, so the cut corners keep their outline. */
+  .seg { display: flex; gap: 1.5px; padding: 1.5px; background: var(--light); clip-path: var(--cut-shape); }
+  .seg[hidden] { display: none; }
+  .seg button {
+    appearance: none; border: 0; margin: 0; padding: 0 14px; min-height: 36px;
+    background: var(--space); color: var(--light-soft);
+    font: inherit; cursor: pointer;
+  }
+  .seg button:first-child { clip-path: polygon(0 0, 100% 0, 100% 100%, calc(var(--cut) - 0.6px) 100%, 0 calc(100% - var(--cut) + 0.6px)); padding-left: 16px; }
+  .seg button:last-child { clip-path: polygon(0 0, calc(100% - var(--cut) + 0.6px) 0, 100% calc(var(--cut) - 0.6px), 100% 100%, 0 100%); padding-right: 16px; }
+  .seg button[aria-checked="true"] { background: var(--light); color: var(--space); font-weight: 600; }
+  .seg button:focus { outline: none; }
+  .seg button:focus-visible { background: var(--yellow); color: var(--space); }
+
+  /* ---- bottom: one slim glass panel holding the controls and the credit ---- */
+  .dock {
+    --cut: 12px;
+    --line: rgba(233, 238, 247, 0.32);
+    --line-soft: rgba(233, 238, 247, 0.14);
+    position: fixed;
+    left: calc(var(--edge) + env(safe-area-inset-left));
+    bottom: calc(var(--edge) + env(safe-area-inset-bottom));
+    width: fit-content;
+    max-width: calc(100% - 2 * var(--edge) - env(safe-area-inset-left) - env(safe-area-inset-right));
+    background: rgba(9, 14, 32, 0.6);
+    -webkit-backdrop-filter: blur(14px) saturate(1.3);
+    backdrop-filter: blur(14px) saturate(1.3);
+    padding: 1px;
+    clip-path: var(--cut-shape);
+  }
+  /* Outline: a 1px ring that follows the cut corners exactly (the panel's shape with a 1px-smaller copy punched out). */
+  .dock::before {
+    content: ""; position: absolute; inset: 0; pointer-events: none;
+    background: var(--line);
+    clip-path: polygon(evenodd,
+      0 0, calc(100% - var(--cut)) 0, 100% var(--cut), 100% 100%, var(--cut) 100%, 0 calc(100% - var(--cut)), 0 0,
+      1px 1px, 1px calc(100% - var(--cut) - 0.41px), calc(var(--cut) + 0.41px) calc(100% - 1px), calc(100% - 1px) calc(100% - 1px),
+      calc(100% - 1px) calc(var(--cut) + 0.41px), calc(100% - var(--cut) - 0.41px) 1px, 1px 1px);
+  }
+
+  /* Material switches sit on their own row at the top of the panel. */
+  .looks { display: flex; flex-wrap: wrap; gap: 8px; padding: 10px 52px 10px 10px; --cut: 8px; }   /* right padding leaves room for the minimize button */
+  .looks .seg button { min-height: 32px; }
+
+  /* Minimize sits in the panel's top right corner. Minimized, the panel shrinks to this one button with a label. */
+  .mini {
+    position: absolute; top: 9px; right: 9px; z-index: 1;
+    appearance: none; border: 0; margin: 0; padding: 0; width: 34px; height: 34px;
+    background: none; color: var(--light-soft);
+    font: inherit; font-size: 13px; font-weight: 600; letter-spacing: 0.02em; cursor: pointer;
+    display: flex; align-items: center; justify-content: center; gap: 8px;
+  }
+  .mini:hover { color: var(--light); background: rgba(233, 238, 247, 0.08); }
+  .mini:focus { outline: none; }
+  .mini:focus-visible { color: var(--yellow); }
+  .mini svg { width: 12px; height: 12px; }
+  .mini .ico-open, .mini .mini-label { display: none; }
+  .dock.min .mini { position: static; width: auto; height: auto; padding: 9px 18px 9px 14px; color: var(--light); }
+  .dock.min .mini .ico-min { display: none; }
+  .dock.min .mini .ico-open, .dock.min .mini .mini-label { display: inline; }
+  .dock.dock.min { right: auto; width: fit-content; }   /* doubled class: must beat the full-width rule on phones */
+  #panel[hidden] { display: none; }
+  /* Minimizing and restoring: the script sets the start and end size, this eases between them while the contents fade. */
+  .dock.moving { overflow: hidden; transition: width 0.3s cubic-bezier(0.3, 0.7, 0.2, 1), height 0.3s cubic-bezier(0.3, 0.7, 0.2, 1); }
+  .dock.moving #panel { transition: opacity 0.18s ease; }
+  .dock.closing #panel { opacity: 0; }
+  .dock.opening #panel { animation: panel-in 0.3s ease both; }
+  @keyframes panel-in { from { opacity: 0; } }
+
+  /* Credits accordion at the foot of the panel. The row height eases between nothing and the text's own height. */
+  .dock-foot { display: flex; border-top: 1px solid var(--line-soft); }
+  .tab {
+    appearance: none; border: 0; margin: 0; padding: 8px 14px 8px 16px;
+    background: none; color: var(--light-soft);
+    font: inherit; font-size: 12px; font-weight: 600; letter-spacing: 0.02em; cursor: pointer;
+    display: flex; align-items: center; gap: 7px;
+  }
+  .tab:hover, .tab[aria-expanded="true"] { color: var(--light); }
+  .tab svg { width: 10px; height: 10px; transition: transform 0.2s ease; }
+  .tab[aria-expanded="false"] svg { transform: rotate(-90deg); }
+  .tab:focus { outline: none; }
+  .tab:focus-visible { color: var(--yellow); }
+  .fold { display: grid; grid-template-rows: 0fr; transition: grid-template-rows 0.26s ease; }
+  .fold.open { grid-template-rows: 1fr; }
+  .fold > div { min-height: 0; overflow: hidden; visibility: hidden; transition: visibility 0s 0.26s; }
+  .fold.open > div { visibility: visible; transition-delay: 0s; }
+
+  .controls { border-top: 1px solid var(--line-soft); }
+  .controls { display: flex; flex-direction: column; gap: 2px; padding: 8px 8px 10px; }
+  .controls .set { display: flex; flex-wrap: wrap; gap: 2px; }
+
+  /* Each control is a quiet row: a small keycap and what it does. It fills in while the move is active. */
+  .key {
+    appearance: none; border: 0; margin: 0; padding: 5px 10px 5px 6px;
+    background: none; color: var(--light);
+    font: inherit; cursor: pointer;
+  }
+  .key[hidden] { display: none; }
+  .key > span { display: flex; align-items: center; gap: 8px; }
+  .key kbd {
+    display: grid; place-items: center; min-width: 24px; height: 24px; padding: 0 6px;
+    border: 1px solid var(--line);
+    font: inherit; font-size: 12px; font-weight: 600;
+  }
+  .key kbd + em { font-style: normal; color: var(--light-soft); }
+  .key.pair { padding-right: 3px; }
+  .key.pair:has(em) { padding-right: 10px; }
+  .key:hover { background: rgba(233, 238, 247, 0.08); }
+  .key:focus { outline: none; }
+  .key:focus-visible { background: var(--yellow); color: var(--space); }
+  .key.on { background: var(--light); color: var(--space); }
+  .key.on kbd, .key:focus-visible kbd { border-color: currentColor; }
+  .key.on kbd + em, .key:focus-visible kbd + em { color: var(--space); }
+
+  /* Zero width plus full min-width: the credit wraps to the panel instead of stretching it. */
+  .credit { margin: 0; padding: 0 16px 9px; width: 0; min-width: 100%; font-size: 11.5px; line-height: 1.45; color: var(--light-soft); overflow-wrap: anywhere; }
+  .credit a { color: var(--light); text-underline-offset: 3px; text-decoration-thickness: 1px; }
+  .credit a:focus-visible { outline: 1.5px solid var(--yellow); outline-offset: 2px; }
+
+  .loading, .notice { position: fixed; inset: 0; display: grid; place-items: center; padding: var(--edge); text-align: center; pointer-events: none; }
+  .loading[hidden] { display: none; }
+  .notice { display: none; background: var(--space); pointer-events: auto; }
+  .notice.show { display: grid; }
+
+  /* Phones and narrow windows: the panel spans the width. */
+  @media (max-width: 720px) {
+    body { font-size: 14px; }
+    .plate p { display: none; }
+    .seg button { padding: 0 11px; min-height: 40px; }
+    .seg button:first-child { padding-left: 13px; }
+    .seg button:last-child { padding-right: 13px; }
+    .dock { right: calc(var(--edge) + env(safe-area-inset-right)); width: auto; max-width: none; }
+  }
+  /* Touch screens have no keyboard, so the letter hints go and the action names become outlined buttons.
+     Dragging already turns the view there, so the arrow keys go too and the rest flow as one group. */
+  @media (hover: none) and (pointer: coarse) {
+    .key.pair { display: none; }
+    .controls { flex-direction: row; flex-wrap: wrap; gap: 6px; padding: 10px; }
+    .controls .set { display: contents; }
+    .key { min-height: 44px; padding: 0 14px; border: 1px solid var(--line); }
+    .key:not(.pair) kbd { display: none; }
+    .key:not(.pair) kbd + em { color: var(--light); }
+    .key.on:not(.pair) kbd + em { color: var(--space); }
+    .key:hover { background: none; }
+    .key.on:hover { background: var(--light); }
+    .mini { width: 40px; height: 40px; top: 10px; right: 8px; }
+    .tab { min-height: 44px; }
+    .dock.min .mini { min-height: 44px; }
+    .looks .seg button { min-height: 40px; }
+  }
+  /* Short landscape phones: keep the title small. */
+  @media (max-height: 480px) {
+    .plate h1 { font-size: 24px; }
+    .plate p { display: none; }
+    .seg button { min-height: 34px; }
+  }
+  @media (prefers-reduced-motion: reduce) { .tab svg, .fold, .fold > div { transition: none; } .dock.opening #panel { animation: none; } }
+</style>
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"
+  }
+}
+</script>
+</head>
+<body>
+<canvas id="view" aria-label="An RX-78-2 Gundam you can pose with the controls below"></canvas>
+
+<header class="top">
+  <div class="plate">
+    <h1>Interactive Gundam</h1>
+    <p>Hold a key and it moves; let go and it stands still again. Drag to turn it, scroll or pinch to zoom.</p>
+  </div>
+</header>
+
+<p class="sr-only" id="status" role="status" aria-live="polite">Loading the model</p>
+<p class="loading" id="loading">Loading the model</p>
+
+<footer class="dock" id="dock">
+  <button class="mini" id="toggle" aria-expanded="true" aria-controls="panel" aria-label="Minimize panel" title="Minimize">
+    <svg class="ico-min" viewBox="0 0 12 12" aria-hidden="true"><path d="M2 6h8" fill="none" stroke="currentColor" stroke-width="1.8"/></svg>
+    <svg class="ico-open" viewBox="0 0 12 12" aria-hidden="true"><path d="M1.5 8 6 3.5 10.5 8" fill="none" stroke="currentColor" stroke-width="1.8"/></svg>
+    <span class="mini-label">Controls</span>
+  </button>
+  <div id="panel">
+  <div class="looks">
+    <div class="seg" id="look" role="radiogroup" aria-label="Look">
+      <button role="radio" aria-checked="false" data-mode="full" title="Press 1">Full materials</button>
+      <button role="radio" aria-checked="true" data-mode="wireframe" title="Press 2">Wireframe</button>
+      <button role="radio" aria-checked="false" data-mode="particles" title="Press 3">Particles</button>
+    </div>
+    <div class="seg" id="tint" role="radiogroup" aria-label="Particle color">
+      <button role="radio" aria-checked="true" data-tint="color" title="Press V to switch">Color</button>
+      <button role="radio" aria-checked="false" data-tint="white" title="Press V to switch">White</button>
+    </div>
+  </div>
+  <div class="controls" id="controls">
+    <div class="set" aria-label="Moves">
+      <button class="key" data-act="walk"><span><kbd>W</kbd><em>Walk</em></span></button>
+      <button class="key" data-act="jump"><span><kbd>Space</kbd><em>Jump</em></span></button>
+      <button class="key" data-act="crouch"><span><kbd>C</kbd><em>Crouch</em></span></button>
+      <button class="key" data-act="fire"><span><kbd>F</kbd><em>Fire rifle</em></span></button>
+      <button class="key" data-act="slash"><span><kbd>E</kbd><em>Slash</em></span></button>
+    </div>
+    <div class="set" aria-label="View">
+      <button class="key pair" data-act="left" aria-label="Spin left"><span><kbd>←</kbd></span></button>
+      <button class="key pair" data-act="right" aria-label="Spin right"><span><kbd>→</kbd><em>Spin</em></span></button>
+      <button class="key pair" data-act="up" aria-label="Tilt view from above"><span><kbd>↑</kbd></span></button>
+      <button class="key pair" data-act="down" aria-label="Tilt view from below"><span><kbd>↓</kbd><em>Tilt</em></span></button>
+      <button class="key" data-act="xray"><span><kbd>X</kbd><em>See through</em></span></button>
+    </div>
+  </div>
+  <div class="dock-foot">
+    <button class="tab" id="credit-toggle" aria-expanded="false" aria-controls="credit">
+      Credits
+      <svg viewBox="0 0 12 12" aria-hidden="true"><path d="M1.5 4 6 8.5 10.5 4" fill="none" stroke="currentColor" stroke-width="1.8"/></svg>
+    </button>
+  </div>
+  <div class="fold" id="credit-fold"><div>
+  <p class="credit" id="credit">
+    Model: <a href="https://sketchfab.com/3d-models/rx-78-2-gundam-8b1ec0f948984aa897e60b63a13b501c" target="_blank" rel="noopener">RX-78-2 Gundam</a>
+    by <a href="https://sketchfab.com/nama_140" target="_blank" rel="noopener" lang="ja">みそ太郎</a> on Sketchfab,
+    licensed CC BY 4.0
+  </p>
+  </div></div>
+  </div>
+</footer>
+
+<div class="notice" id="notice">
+  <p>The model could not load. It needs WebGL, gundam.glb next to this page, and a connection for three.js. Check those, then reload.</p>
+</div>
+
+<script>
+  const showNotice = () => { if (!window.__running) document.getElementById('notice').classList.add('show'); };
+  window.addEventListener('error', showNotice, true);
+  window.addEventListener('unhandledrejection', showNotice);
+</script>
+<script type="module" src="main.js"></script>
+</body>
+</html>
